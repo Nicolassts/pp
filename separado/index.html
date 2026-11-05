@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kanban de Produção</title>
+<link rel="stylesheet" href="estilo.css">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head><body>
+<header class="top"><div><h1>Kanban de Produção</h1><p>Do planejamento ao documento de cada ambiente, com meta por turno.</p></div><div class="row"><label>IA <select id="aiProvider"><option value="gemini">Gemini</option><option value="groq">Groq</option></select></label><button class="sec" id="bnew">← Nova foto</button><button id="bprod">Análise e desempenho</button><button class="sec" id="bchat">Chat de ocorrências</button></div></header>
+<main>
+<div class="card"><h2><i>1</i>Foto do planejamento</h2><div class="bd">
+<div class="drop" id="drop">Clique, arraste ou cole (Ctrl+V) a imagem aqui<img id="prev" alt="" hidden></div><input type="file" id="file" accept="image/*" hidden>
+<div class="row" style="margin-top:12px"><button id="read" disabled>Ler planejamento da imagem</button><button class="sec" id="wipe">Limpar planejamento</button><span id="msg" class="sub" style="margin:0"></span></div></div></div>
+
+<div class="card"><h2><i>2</i>Planejamento lido <small id="cnt"></small></h2><div class="bd">
+<div class="row" style="margin-bottom:10px"><label>Período <input id="periodo" value="Outubro/2026"></label><button class="sec" id="add">+ Dia</button></div>
+<div class="wrap"><table><thead><tr><th>Linha</th><th>Data</th><th>Plano (kg)</th><th>SKU</th><th>Observação</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+<p id="empty" class="sub">Nada lido ainda. Envie a foto ou adicione dias manualmente.</p></div></div>
+
+<div class="card"><h2><i>3</i>Resumo do período</h2><div class="bd" id="sum"></div></div>
+
+<div class="card" id="rc" hidden><h2><i>4</i>Receitas dos produtos</h2><div class="bd"><div class="tabs" id="rtabs"></div><p class="sub" style="margin:0 0 8px">Cole abaixo a receita do produto selecionado, copiada direto da planilha (código, produto, base, teórico, c/ perda e %). Os documentos só são gerados depois que a receita de todos os produtos for colada.</p><textarea id="rtxt" rows="7" placeholder="Cole aqui a receita…" style="width:100%;font:12px/1.4 ui-monospace,Consolas,monospace;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:4px;padding:8px"></textarea><div class="row" style="margin-top:8px"><button class="sec" id="rclr">Limpar receita</button></div><div id="rsum"></div></div></div>
+<div class="card"><h2><i>5</i>Documentos por ambiente</h2><div class="bd">
+<div class="fil"><div id="psel"><b>Setores (PDF)</b><div class="row"><label><input type="checkbox" value="massa" checked> Massa</label><label><input type="checkbox" value="net"> NET / Recheio</label><label><input type="checkbox" value="dos"> Dosimetria</label><label><input type="checkbox" value="log"> Logística</label></div></div>
+<div id="lsel"><b>Linhas</b><div class="row"><label><input type="checkbox" value="1" checked> Linha 1</label><label><input type="checkbox" value="2" checked> Linha 2</label><label><input type="checkbox" value="3" checked> Linha 3</label><label><input type="checkbox" value="4" checked> Linha 4</label></div></div>
+<div><b>Período</b><div class="row"><label>De <input type="date" id="d_de"></label><label>Até <input type="date" id="d_ate"></label><button class="sec" id="d_all">Período todo</button></div></div></div>
+<div class="tabs" id="tabs"></div>
+<div class="row" style="margin-bottom:6px"><button id="pdf1">Baixar PDF dos setores marcados</button><button class="sec" id="pdfA">PDF de todos os ambientes</button><button class="sec" id="csv">Baixar CSV</button><button class="sec" id="csvI">CSV de insumos</button><span id="dmsg" class="sub" style="margin:0"></span></div>
+<div id="dv"></div></div></div>
+
+<div class="card"><h2><i>6</i>Kits por receita</h2><div class="bd"><div class="wrap"><table><thead><tr><th>Linha</th><th>Produto</th><th>Cliente (padrão)</th><th>Massa (kg)</th><th>Recheio (kg)</th><th>Kits de massa</th><th>Kits por turno</th></tr></thead><tbody id="kb"></tbody></table></div>
+<p id="kempty" class="sub">Aparece depois da leitura da foto. Cada kit corresponde a uma batelada de massa.</p></div></div>
+
+<div class="card" id="prod"><h2><i>7</i>Produção: ocorrências, desempenho e análise</h2><div class="bd">
+<div class="row"><label>Data <input type="date" id="o_d"></label><label>Linha <select id="o_l"><option>1</option><option>2</option><option>3</option><option>4</option></select></label><label>Turno <select id="o_t"><option>1º</option><option>2º</option><option>3º</option></select></label><label>Tipo <select id="o_c"><option>Parada de máquina</option><option>Setup / troca de produto</option><option>Falta de material</option><option>Qualidade / refugo</option><option>Manutenção</option><option>Procedimento</option><option>Outro</option></select></label><label>Min. parados <input type="number" id="o_m" value="0" style="width:80px"></label><label>Kg perdidos <input type="number" id="o_k" value="0" style="width:80px"></label></div>
+<div class="row" style="margin-top:8px"><input id="o_x" placeholder="Descreva o problema" style="flex:1;min-width:220px"><button id="o_add">Lançar ocorrência</button></div>
+<div class="wrap" style="margin-top:10px"><table><thead><tr><th>Data</th><th>Linha</th><th>Turno</th><th>Tipo</th><th>Min</th><th>Kg</th><th>Descrição</th><th></th></tr></thead><tbody id="ob"></tbody></table></div>
+<h3>Desempenho (OEE)</h3>
+<div class="row"><label>Horas planejadas <input type="number" id="h_p" value="24" style="width:80px"></label><label>Produção real (kg) <input type="number" id="k_r" style="width:110px"></label><label>Plano (kg) <input type="number" id="k_p" placeholder="do planejamento" style="width:130px"></label></div>
+<div class="kpi" id="kpi" style="margin-top:10px"></div>
+<div class="row" style="margin-top:10px"><button id="ana">Analisar com IA</button><button class="sec" id="ocsv">CSV das ocorrências</button></div><div class="out" id="aout" hidden></div>
+<h3>Chat de ocorrências</h3><div id="log"></div>
+<div class="row" style="margin-top:8px"><input id="cin" placeholder="Pergunte sobre ocorrências, paradas, turnos…" style="flex:1;min-width:220px"><button id="csend">Enviar</button></div></div></div>
+</main>
+<script src="app.js"></script></body></html>

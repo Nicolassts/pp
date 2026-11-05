@@ -1,0 +1,31 @@
+Kanban de Producao
+
+Arquivos
+- kanban-producao-v2.html: versao completa em um unico arquivo.
+- separado/index.html, estilo.css, app.js: versao dividida, publicada pelo Cloudflare Worker.
+- worker/index.js: backend que chama Gemini ou Groq sem expor as chaves no navegador.
+- wrangler.toml: configuracao de deploy do Worker e dos arquivos em separado/.
+
+IA e seguranca
+- O seletor IA da tela permite escolher Gemini ou Groq para leitura da foto, chat e analise.
+- Nunca coloque chaves no HTML, JavaScript, GitHub ou mensagens. Configure-as como secrets do Cloudflare.
+- As chaves enviadas anteriormente foram expostas. Revogue-as nos paineis dos provedores e gere novas antes de configurar.
+- O endpoint de IA e publico por padrao. Antes de divulgar o site, configure protecao contra abuso/rate limiting no Cloudflare.
+- Para testar localmente, crie .dev.vars (ignorado pelo Git) com GEMINI_API_KEY e GROQ_API_KEY, uma por linha, e execute npx wrangler@latest dev.
+
+Deploy no Cloudflare Workers
+1. No terminal, entre nesta pasta do projeto e execute npx wrangler@latest login.
+2. Cadastre cada chave nova como secret, sem coloca-la em arquivos versionados:
+	npx wrangler@latest secret put GEMINI_API_KEY
+	npx wrangler@latest secret put GROQ_API_KEY
+3. Publique com npx wrangler@latest deploy. O endereco exibido pelo Wrangler serve a versao separado/.
+
+GitHub
+- O repositorio informado e https://github.com/Nicolassts/pp.git.
+- O ambiente atual nao tem o comando git instalado; por isso, o push nao foi executado.
+- Depois de instalar Git, confira o remoto com git remote -v. Se ainda nao existir, use git remote add origin https://github.com/Nicolassts/pp.git.
+- Revise os arquivos staged e publique com git add, git commit e git push. Nunca versione .dev.vars ou chaves de API.
+
+Outros
+- O PDF usa jsPDF e jsPDF-AutoTable (cdnjs; requer internet).
+- Constante de calculo no inicio de app.js: BAT=500 (kg/batelada).
