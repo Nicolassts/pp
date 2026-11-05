@@ -11,7 +11,9 @@ const aiSelect=$("aiProvider");
 if(aiSelect){aiSelect.value=ld("kb_ai_provider","gemini");aiSelect.onchange=()=>sv("kb_ai_provider",aiSelect.value)}
 async function requestAI(payload){
   const response=await fetch("/api/complete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...payload,provider:aiSelect?.value||"gemini"})});
-  const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||`Falha na API (HTTP ${response.status}).`);return result.text||""}
+  const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||`Falha na API (HTTP ${response.status}).`);
+  if(result.provider&&aiSelect&&result.provider!==aiSelect.value){aiSelect.value=result.provider;sv("kb_ai_provider",result.provider)}
+  return result.text||""}
 let rows=ld("kb_rows",[]),MAP=ld("kb_map",{}),obs=ld("kb_obs",[]),cur="massa",file=null;
 const CLI=[
 {n:"Hershey’s Io-Iô Duo",r:/\bio[\s-]?io\b.*duo|duo.*\bio[\s-]?io\b/,m:40,c:60,g:1.5},

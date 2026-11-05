@@ -80,8 +80,8 @@ async function handleApi(request, env) {
     return json({ error: "Corpo JSON inválido." }, 400);
   }
 
-  const provider = body.provider || env.DEFAULT_AI_PROVIDER || "gemini";
-  if (!["gemini", "groq"].includes(provider)) return json({ error: "Provedor inválido." }, 400);
+  const requestedProvider = body.provider || env.DEFAULT_AI_PROVIDER || "gemini";
+  if (!["gemini", "groq"].includes(requestedProvider)) return json({ error: "Provedor inválido." }, 400);
   if (typeof body.prompt !== "string" && !Array.isArray(body.messages)) {
     return json({ error: "Informe um prompt ou mensagens." }, 400);
   }
@@ -96,11 +96,18 @@ async function handleApi(request, env) {
     return json({ error: "Imagem inválida ou acima do limite de tamanho." }, 400);
   }
 
+  const configured = { gemini: Boolean(env.GEMINI_API_KEY), groq: Boolean(env.GROQ_API_KEY) };
+  const fallbackProvider = requestedProvider === "gemini" ? "groq" : "gemini";
+  const provider = configured[requestedProvider] ? requestedProvider : fallbackProvider;
+  if (!configured[provider]) {
+    return json({ error: "Nenhum provedor de IA está configurado no Worker. Cadastre GEMINI_API_KEY ou GROQ_API_KEY no Cloudflare." }, 503);
+  }
+
   try {
     const text = provider === "gemini"
       ? await askGemini(env, body.prompt || "", body.messages, image)
       : await askGroq(env, body.prompt || "", body.messages, image);
-    return json({ text });
+    return json({ text, provider, fallback: provider !== requestedProvider });
   } catch (error) {
     return json({ error: error.message || "Falha ao consultar o provedor de IA." }, 502);
   }
