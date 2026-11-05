@@ -146,11 +146,12 @@ $("drop").ondragover=e=>e.preventDefault();$("drop").ondrop=e=>{e.preventDefault
 addEventListener("paste",e=>{const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/"));if(it)setFile(it.getAsFile())});
 async function shrink(f){try{const b=await createImageBitmap(f),s=Math.min(1,1800/Math.max(b.width,b.height)),c=document.createElement("canvas");c.width=Math.round(b.width*s);c.height=Math.round(b.height*s);c.getContext("2d").drawImage(b,0,0,c.width,c.height);return await new Promise(r=>c.toBlob(r,"image/jpeg",.9))||f}catch(e){return f}}
 async function imageData(f){const blob=await shrink(f);const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",")[1]);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)});return{mimeType:blob.type||"image/jpeg",data}}
+function parsePlan(text){const raw=String(text).replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim(),start=raw.indexOf("{"),end=raw.lastIndexOf("}");if(start<0||end<start)throw new Error("A IA não devolveu os dados completos. Tente novamente com uma foto mais nítida.");try{return JSON.parse(raw.slice(start,end+1))}catch{throw new Error("A resposta da IA veio incompleta. Tente uma foto mais nítida ou envie o quadro dividido por linha.")}}
 $("read").onclick=async()=>{$("read").disabled=true;$("msg").textContent="Lendo a imagem…";
-  try{const text=await requestAI({prompt:`Você recebe a foto de um quadro de planejamento de produção com LINHA 1 a LINHA 4 (colunas: dia, data, PLAN, REAL, SKU). Retorne SOMENTE JSON, sem texto extra:
+  try{const text=await requestAI({prompt:`Você recebe a foto de um quadro de planejamento de produção com LINHA 1 a LINHA 4 (colunas: dia, data, PLAN, REAL, SKU). Retorne SOMENTE um objeto JSON válido e compacto, sem markdown ou comentários:
 {"periodo":"Outubro/2026","dias":[{"linha":1,"data":"2026-10-16","plan":5000,"sku":"SDV MINI","obs":""}]}
 Regras: plan em kg como número (5.000 vira 5000; vazio vira null). Textos escritos na coluna REAL (DESIN, TROCA P/ ..., Ag. Laudo massa, PRODUÇÃO L3, VISITA TÉCNICA) vão em obs. Se um dia está sem SKU, repita o SKU só se estiver escrito. Inclua TODOS os dias de TODAS as linhas, inclusive sábados e domingos. Use o ano do cabeçalho.`,image:await imageData(file)});
-    const r=JSON.parse(text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,""));
+    const r=parsePlan(text);
     rows=(r.dias||[]).map(d=>({linha:+d.linha,data:d.data,plan:d.plan,sku:d.sku||"",obs:d.obs||""}));if(r.periodo)$("periodo").value=r.periodo;
     setRange();render();$("msg").textContent=rows.length+" dias lidos. Cole a receita de cada produto para gerar os documentos."}
   catch(e){$("msg").textContent="Não consegui ler: "+(e.message||e.code||"erro")+". Tente novamente."}finally{$("read").disabled=false}};

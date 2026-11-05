@@ -30,7 +30,12 @@ async function askGemini(env, prompt, messages, image) {
       "content-type": "application/json",
       "x-goog-api-key": env.GEMINI_API_KEY
     },
-    body: JSON.stringify({ contents, generationConfig: { temperature: 0.2 } })
+    body: JSON.stringify({
+      contents,
+      generationConfig: image
+        ? { temperature: 0.2, responseMimeType: "application/json" }
+        : { temperature: 0.2 }
+    })
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message || `Gemini respondeu HTTP ${response.status}.`);
@@ -60,7 +65,8 @@ async function askGroq(env, prompt, messages, image) {
     body: JSON.stringify({
       model: image ? "qwen/qwen3.8-27b" : "openai/gpt-oss-20b",
       messages: chat,
-      temperature: 0.2
+      temperature: 0.2,
+      ...(image ? { response_format: { type: "json_object" }, max_completion_tokens: 900 } : {})
     })
   });
   const data = await response.json();
@@ -109,6 +115,9 @@ async function handleApi(request, env) {
       : await askGroq(env, body.prompt || "", body.messages, image);
     return json({ text, provider, fallback: provider !== requestedProvider });
   } catch (error) {
+    if (/rate limit|OTPM|output tokens per minute/i.test(error.message || "")) {
+      return json({ error: "O limite temporário da Groq foi atingido. Aguarde cerca de um minuto e tente novamente. Se acontecer com frequência, envie menos linhas por foto ou aumente o limite do plano." }, 429);
+    }
     return json({ error: error.message || "Falha ao consultar o provedor de IA." }, 502);
   }
 }
