@@ -58,7 +58,7 @@ async function askGroq(env, prompt, messages, image) {
       authorization: `Bearer ${env.GROQ_API_KEY}`
     },
     body: JSON.stringify({
-      model: image ? "meta-llama/llama-4-scout-17b-16e-instruct" : "llama-3.3-70b-versatile",
+      model: image ? "qwen/qwen3.8-27b" : "openai/gpt-oss-20b",
       messages: chat,
       temperature: 0.2
     })
