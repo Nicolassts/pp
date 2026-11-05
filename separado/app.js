@@ -60,21 +60,279 @@ function renderKits(){const g={};rows.forEach(r=>{if(!r.plan||!r.sku)return;cons
 function refresh(){sv("kb_rows",rows);viewDoc();renderSum();renderKits();renderRec()}
 
 /* planejamento */
-function setFile(f){if(!f||!f.type.startsWith("image/"))return;file=f;const p=$("prev");p.src=URL.createObjectURL(f);p.hidden=false;$("read").disabled=false}
+function setFile(f){if(!f||!f.type.startsWith("image/"))return;file=f;const p=$("prev");p.src=URL.createObjectURL(f);p.hidden=false;$("read").disabled=false;if($("readAppend"))$("readAppend").disabled=!rows.length}
 $("drop").onclick=()=>$("file").click();$("file").onchange=e=>setFile(e.target.files[0]);
 $("drop").ondragover=e=>e.preventDefault();$("drop").ondrop=e=>{e.preventDefault();setFile(e.dataTransfer.files[0])};
 addEventListener("paste",e=>{const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/"));if(it)setFile(it.getAsFile())});
-async function shrink(f){try{const b=await createImageBitmap(f),s=Math.min(1,1800/Math.max(b.width,b.height)),c=document.createElement("canvas");c.width=Math.round(b.width*s);c.height=Math.round(b.height*s);c.getContext("2d").drawImage(b,0,0,c.width,c.height);return await new Promise(r=>c.toBlob(r,"image/jpeg",.9))||f}catch(e){return f}}
-async function imageData(f){const blob=await shrink(f);const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",")[1]);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)});return{mimeType:blob.type||"image/jpeg",data}}
-function parsePlan(text){const raw=String(text).replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim(),start=raw.indexOf("{"),end=raw.lastIndexOf("}");if(start<0||end<start)throw new Error("A IA não devolveu os dados completos. Tente novamente com uma foto mais nítida.");try{return JSON.parse(raw.slice(start,end+1))}catch{throw new Error("A resposta da IA veio incompleta. Tente uma foto mais nítida ou envie o quadro dividido por linha.")}}
-$("read").onclick=async()=>{$("read").disabled=true;$("msg").textContent="Lendo a imagem…";
-  try{const text=await requestAI({prompt:`Você recebe a foto de um quadro de planejamento de produção com LINHA 1 a LINHA 4 (colunas: dia, data, PLAN, REAL, SKU). Retorne SOMENTE um objeto JSON válido e compacto, sem markdown ou comentários:
-{"periodo":"Outubro/2026","dias":[{"linha":1,"data":"2026-10-16","plan":5000,"sku":"SDV MINI","obs":""}]}
-Regras: plan em kg como número (5.000 vira 5000; vazio vira null). Textos escritos na coluna REAL (DESIN, TROCA P/ ..., Ag. Laudo massa, PRODUÇÃO L3, VISITA TÉCNICA) vão em obs. Se um dia está sem SKU, repita o SKU só se estiver escrito. Inclua TODOS os dias de TODAS as linhas, inclusive sábados e domingos. Use o ano do cabeçalho.`,image:await imageData(file)});
-    const r=parsePlan(text);
-    rows=(r.dias||[]).map(d=>({linha:+d.linha,data:d.data,plan:d.plan,sku:d.sku||"",obs:d.obs||""}));if(r.periodo)$("periodo").value=r.periodo;
-    setRange();render();$("msg").textContent=rows.length+" dias lidos. Cole a receita de cada produto para gerar os documentos."}
-  catch(e){$("msg").textContent="Não consegui ler: "+(e.message||e.code||"erro")+". Tente novamente."}finally{$("read").disabled=false}};
+async function shrink(f){
+  try{
+    const b=await createImageBitmap(f);
+    const maxDim=Math.max(b.width,b.height);
+    const targetMax=2800;
+    const s=Math.min(1,targetMax/maxDim);
+    if(s>=1&&f.size<=4_500_000&&/^image\/(jpeg|png|webp)$/i.test(f.type)){
+      return f;
+    }
+    const c=document.createElement("canvas");
+    c.width=Math.round(b.width*s);
+    c.height=Math.round(b.height*s);
+    const ctx=c.getContext("2d");
+    ctx.imageSmoothingEnabled=true;
+    ctx.imageSmoothingQuality="high";
+    ctx.drawImage(b,0,0,c.width,c.height);
+    return await new Promise(r=>c.toBlob(r,"image/jpeg",.90))||f;
+  }catch(e){
+    return f;
+  }
+}
+async function imageData(f){
+  const blob=await shrink(f);
+  const data=await new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result).split(",")[1]);
+    reader.onerror=()=>reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  return{mimeType:blob.type||"image/jpeg",data};
+}
+
+function parsePlan(text){
+  let raw=String(text||"").trim();
+  const start=raw.indexOf("{");
+  const end=raw.lastIndexOf("}");
+  if(start<0||end<start)throw new Error("A IA não devolveu os dados completos. Tente novamente com uma foto mais nítida.");
+  raw=raw.slice(start,end+1);
+  try{
+    return JSON.parse(raw);
+  }catch(err){
+    try{
+      const cleaned=raw
+        .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm,"")
+        .replace(/,\s*([\]}])/g,"$1");
+      return JSON.parse(cleaned);
+    }catch(err2){
+      throw new Error("A resposta da IA veio incompleta. Tente uma foto mais nítida ou envie o quadro dividido por linha.");
+    }
+  }
+}
+
+const MESES={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
+function parsePeriod(period){
+  const p=String(period||"").toLowerCase();
+  const yMatch=p.match(/20\d{2}/);
+  const year=yMatch?Number(yMatch[0]):new Date().getFullYear();
+  let month=null;
+  for(const[prefix,num]of Object.entries(MESES)){
+    if(p.includes(prefix)){month=num;break}
+  }
+  if(!month){
+    const mMatch=p.match(/(?:^|[^\d])(0?[1-9]|1[0-2])(?:\/|[-.]|20\d{2}|$)/);
+    if(mMatch)month=Number(mMatch[1]);
+  }
+  return{year,month:month||(new Date().getMonth()+1)};
+}
+
+function planKg(value){
+  if(value==null||value==="")return null;
+  if(typeof value==="number")return Number.isFinite(value)?Math.round(value):null;
+  let s=String(value).trim().toLowerCase().replace(/\s+/g,"");
+  if(s===""||s==="-"||s==="null"||s==="undefined")return null;
+  const isTon=/t(?:on(?:elada)?s?)?$/.test(s);
+  s=s.replace(/kg$|k$|t(?:on(?:elada)?s?)?$/,"");
+  if(s.includes(",")){
+    s=s.replace(/\./g,"").replace(",",".");
+  }else if(/^\d{1,3}(\.\d{3})+$/.test(s)){
+    s=s.replace(/\./g,"");
+  }
+  let n=Number(s);
+  if(!Number.isFinite(n))return null;
+  if(isTon)n*=1000;
+  return Math.round(n);
+}
+
+function planLinha(value){
+  if(typeof value==="number")return Math.min(4,Math.max(1,Math.round(value)));
+  const s=String(value??"").trim();
+  const m=s.match(/\b([1-4])\b/)||s.match(/([1-4])/);
+  if(m)return Number(m[1]);
+  const n=Number(s.replace(/\D/g,""));
+  return n>=1&&n<=4?n:0;
+}
+
+function validPlanDate(value){
+  const [year,month,day]=value.split("-").map(Number),
+        date=new Date(Date.UTC(year,month-1,day));
+  return date.getUTCFullYear()===year&&date.getUTCMonth()===month-1&&date.getUTCDate()===day;
+}
+
+function planDate(value,period){
+  const s=String(value??"").trim();
+  if(!s)return"";
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return validPlanDate(s)?s:"";
+  const m=s.match(/^(\d{1,2})[/.\-](\d{1,2})(?:[/.\-](\d{2,4}))?$/);
+  if(m){
+    const year=m[3]?(m[3].length===2?"20"+m[3]:m[3]):(String(period).match(/20\d{2}/)?.[0]||String(new Date().getFullYear()));
+    const date=year+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+    return validPlanDate(date)?date:"";
+  }
+  const dOnly=s.match(/^(\d{1,2})(?:º|°)?$/);
+  if(dOnly){
+    const day=Number(dOnly[1]);
+    if(day>=1&&day<=31){
+      const info=parsePeriod(period);
+      const date=info.year+"-"+String(info.month).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+      return validPlanDate(date)?date:"";
+    }
+  }
+  return"";
+}
+
+function extractRawDays(result){
+  if(!result)return[];
+  if(Array.isArray(result))return result;
+  const allDays=[];
+  if(Array.isArray(result.dias)){
+    allDays.push(...result.dias);
+  }else if(result.dias&&typeof result.dias==="object"){
+    for(const[k,v]of Object.entries(result.dias)){
+      if(Array.isArray(v)){
+        const lNum=planLinha(k);
+        v.forEach(it=>allDays.push({...it,linha:it.linha!=null?planLinha(it.linha):lNum}));
+      }
+    }
+  }
+  if(Array.isArray(result.linhas)){
+    for(const l of result.linhas){
+      const lNum=planLinha(l.linha||l.nome||l.line);
+      const items=Array.isArray(l.dias)?l.dias:Array.isArray(l.registros)?l.registros:[];
+      items.forEach(it=>allDays.push({...it,linha:it.linha!=null?planLinha(it.linha):lNum}));
+    }
+  }
+  for(const[k,v]of Object.entries(result)){
+    if(k==="dias"||k==="linhas"||k==="periodo")continue;
+    const m=k.match(/(?:linha|l|^)[_\s-]*([1-4])$/i)||k.match(/^([1-4])$/);
+    if(m&&Array.isArray(v)){
+      const lNum=Number(m[1]);
+      v.forEach(it=>allDays.push({...it,linha:it.linha!=null?planLinha(it.linha):lNum}));
+    }
+  }
+  return allDays;
+}
+
+function normalizePlan(text){
+  const result=parsePlan(text);
+  const rawDays=extractRawDays(result);
+  if(!rawDays.length)throw new Error("Não encontrei dias válidos. Envie uma foto mais nítida, enquadrando o cabeçalho e as linhas.");
+  const periodo=String(result.periodo||"").trim();
+  const lastSkuByLine={};
+  let currentLinha=1;
+  const dias=rawDays.map(d=>{
+    let linha=planLinha(d.linha);
+    if(linha>=1&&linha<=4){
+      currentLinha=linha;
+    }else if(currentLinha>=1&&currentLinha<=4){
+      linha=currentLinha;
+    }else{
+      linha=1;
+    }
+    const data=planDate(d.data,periodo);
+    const plan=planKg(d.plan);
+    let sku=String(d.sku??"").trim();
+    const obs=String(d.obs??"").trim();
+    if(/^["'“”«»↓/\\-]+$/i.test(sku)||/^idem$/i.test(sku)){
+      sku=lastSkuByLine[linha]||"";
+    }
+    if(sku){
+      lastSkuByLine[linha]=sku;
+    }
+    return{linha,data,plan,sku,obs};
+  }).filter(d=>d.linha>=1&&d.linha<=4&&(d.data||d.plan!=null||d.sku||d.obs));
+  if(!dias.length)throw new Error("Não encontrei dias válidos. Envie uma foto mais nítida, enquadrando o cabeçalho e as linhas.");
+  dias.sort((a,b)=>a.linha-b.linha||String(a.data).localeCompare(b.data));
+  return{periodo,dias};
+}
+
+function mergeRows(existing, incoming){
+  const map=new Map();
+  existing.forEach(r=>{map.set(r.linha+"|"+(r.data||""),r)});
+  incoming.forEach(r=>{map.set(r.linha+"|"+(r.data||""),r)});
+  return[...map.values()].sort((a,b)=>a.linha-b.linha||String(a.data).localeCompare(b.data));
+}
+
+function lineSummary(dias){
+  const c={};dias.forEach(d=>{c[d.linha]=(c[d.linha]||0)+1});
+  return Object.keys(c).sort().map(l=>`Linha ${l}: ${c[l]}d`).join(", ");
+}
+
+const PROMPT_PLAN=`VOCÊ É UM SISTEMA ESPECIALIZADO EM OCR INDUSTRIAL DE PCP (PLANEJAMENTO E CONTROLE DE PRODUÇÃO).
+MISSÃO OBRIGATÓRIA: EXTRAIR OS DADOS DE TODAS AS 4 LINHAS DE PRODUÇÃO (LINHA 1, LINHA 2, LINHA 3 E LINHA 4).
+
+ATENÇÃO CRÍTICA:
+- NÃO EXTRAIA APENAS A LINHA 1! O quadro contém as Linhas 1, 2, 3 e 4.
+- Uma resposta contendo somente a Linha 1 É CONSIDERADA INCOMPLETA E INCORRETA.
+- Você DEVE inspecionar todo o quadro e extrair Linha 1, Linha 2, Linha 3 e Linha 4.
+
+DISPOSIÇÃO DAS 4 LINHAS NO QUADRO:
+As 4 linhas normalmente aparecem na foto em uma destas três formas:
+1. Quatro colunas verticais lado a lado: Coluna 1 = Linha 1, Coluna 2 = Linha 2, Coluna 3 = Linha 3, Coluna 4 = Linha 4. (Percorra todas as 4 colunas da esquerda para a direita!).
+2. Quatro blocos/tabelas horizontais empilhadas: Bloco 1 = Linha 1, Bloco 2 = Linha 2, Bloco 3 = Linha 3, Bloco 4 = Linha 4. (Percorra todos os 4 blocos de cima para baixo!).
+3. Quatro quadrantes (grade 2x2): Superior-esq = Linha 1, Superior-dir = Linha 2, Inferior-esq = Linha 3, Inferior-dir = Linha 4. (Percorra os 4 quadrantes!).
+
+REGRAS DE EXTRAÇÃO:
+- "periodo": Mês e ano do cabeçalho (ex.: "Outubro/2026").
+- "linha": OBRIGATORIAMENTE o número da linha correspondente: 1, 2, 3 ou 4.
+- "data": Data no formato ISO "AAAA-MM-DD" (ex.: "2026-10-01"). Percorra todos os dias do mês (1 a 31) para CADA UMA das 4 linhas.
+- "plan": Quantidade em kg (número puro). Ex: "5.000" vira 5000; "5 t" vira 5000. Se o dia for sem produção planejada, folga, limpeza ou manutenção, use null.
+- "sku": Nome ou sigla do produto (ex.: "IO-IO DUO", "HER-DUO", "SDV MINI", "ARCOR", "BAUDUCCO", etc.).
+  * PROPAGAÇÃO: Se houver setas para baixo (↓), aspas ("), linhas ou bloco contínuo do mesmo lote, REPITA o nome do SKU em todos os dias cobertos por essa corrida na respectiva linha.
+  * Dias de folga/parada sem produto: use "".
+- "obs": Siglas e ocorrências anotadas ("DESIN", "MANUTENÇÃO", "TROCA DE SABOR", "AG. MASSA", "VISITA TÉCNICA", "PRODUÇÃO L3", "FOLGA", "FERIADO") ou valor da coluna Real.
+
+FORMATO DO JSON (DEVE CONTER REGISTROS DAS LINHAS 1, 2, 3 E 4):
+{
+  "periodo": "Outubro/2026",
+  "dias": [
+    {"linha": 1, "data": "2026-10-01", "plan": 5000, "sku": "HER-DUO", "obs": ""},
+    {"linha": 1, "data": "2026-10-02", "plan": 5000, "sku": "HER-DUO", "obs": ""},
+    {"linha": 2, "data": "2026-10-01", "plan": 4500, "sku": "SDV MINI", "obs": "DESIN"},
+    {"linha": 2, "data": "2026-10-02", "plan": 4500, "sku": "SDV MINI", "obs": ""},
+    {"linha": 3, "data": "2026-10-01", "plan": 6000, "sku": "ARCOR", "obs": ""},
+    {"linha": 3, "data": "2026-10-02", "plan": 6000, "sku": "ARCOR", "obs": ""},
+    {"linha": 4, "data": "2026-10-01", "plan": 3000, "sku": "BAUDUCCO", "obs": "MANUTENÇÃO"},
+    {"linha": 4, "data": "2026-10-02", "plan": 3000, "sku": "BAUDUCCO", "obs": ""}
+  ]
+}`;
+
+async function doRead(append){
+  const btn=append?$("readAppend"):$("read");
+  if(btn)btn.disabled=true;
+  $("msg").textContent="Analisando o quadro completo (buscando Linhas 1, 2, 3 e 4, datas e SKUs)…";
+  try{
+    const text=await requestAI({prompt:PROMPT_PLAN,image:await imageData(file)});
+    const r=normalizePlan(text);
+    if(append&&rows.length){
+      rows=mergeRows(rows,r.dias);
+    }else{
+      rows=r.dias;
+    }
+    if(r.periodo)$("periodo").value=r.periodo;
+    setRange();render();
+    const lSummary=lineSummary(rows);
+    const uniqueLines=new Set(rows.map(r=>r.linha));
+    if(uniqueLines.size<2){
+      $("msg").textContent=`${rows.length} dias lidos (${lSummary}). Se as Linhas 2, 3 e 4 estão em outra parte do quadro, você pode tirar uma foto delas e clicar em '+ Ler e mesclar'.`;
+    }else{
+      $("msg").textContent=`${rows.length} dias lidos com sucesso (${lSummary})! Cole a receita de cada produto para gerar os documentos.`;
+    }
+  }catch(e){
+    $("msg").textContent="Não consegui ler: "+(e.message||e.code||"erro")+". Tente novamente.";
+  }finally{
+    if($("read"))$("read").disabled=false;
+    if($("readAppend"))$("readAppend").disabled=!rows.length;
+  }
+}
+$("read").onclick=async()=>doRead(false);
+if($("readAppend"))$("readAppend").onclick=()=>doRead(true);
 function render(){$("tb").innerHTML=rows.map((r,i)=>`<tr class="${r.plan?"":"off"}"><td><input class="n" data-i="${i}" data-k="linha" value="${esc(r.linha)}" style="width:44px"></td><td><input type="date" data-i="${i}" data-k="data" value="${esc(r.data)}"></td><td><input class="n" data-i="${i}" data-k="plan" value="${r.plan??""}"></td><td><input data-i="${i}" data-k="sku" value="${esc(r.sku)}"></td><td><input data-i="${i}" data-k="obs" value="${esc(r.obs)}"></td><td><button class="sec" data-del="${i}">×</button></td></tr>`).join("");
   $("empty").hidden=rows.length>0;$("cnt").textContent=rows.length?"("+rows.length+" dias)":"";refresh()}
 $("tb").oninput=e=>{const t=e.target,i=t.dataset.i;if(i==null)return;const k=t.dataset.k;rows[i][k]=k==="plan"?(t.value===""?null:+t.value.replace(/\./g,"").replace(",",".")):k==="linha"?+t.value:t.value;refresh()};
@@ -152,14 +410,19 @@ $("csend").onclick=send;$("cin").onkeydown=e=>{if(e.key==="Enter")send()};
 const RECS=ld("kb_rec",{});let rcur=null;
 const f4=n=>n.toLocaleString("pt-BR",{minimumFractionDigits:4,maximumFractionDigits:4});
 const fq=n=>n.toLocaleString("pt-BR",{maximumFractionDigits:n<10?2:1});
-const num=s=>{const v=parseFloat(String(s??"").replace(/\./g,"").replace(",","."));return isNaN(v)?null:v};
+const num=s=>{let v=String(s??"").trim().replace(/\s/g,"").replace(/%/g,"");if(!v)return null;
+  if(v.includes(",")){const p=v.lastIndexOf(",");v=v.slice(0,p).replace(/[.,]/g,"")+"."+v.slice(p+1).replace(/\D/g,"")}
+  const n=Number(v);return Number.isFinite(n)?n:null};
 const skus=()=>{const m=new Map();rows.forEach(r=>{if(r.sku&&r.sku.trim()&&r.plan){const k=norm(r.sku);if(!m.has(k))m.set(k,{key:k,name:r.sku.trim()})}});return[...m.values()]};
+function recipeCells(line){if(line.includes("\t"))return line.split("\t").map(x=>x.trim());if(line.includes(";")){const cells=[];line.replace(/(?:^|;)(?:"((?:[^"]|"")*)"|([^;]*))/g,(_,quoted,plain)=>{cells.push((quoted??plain??"").replace(/""/g,'"').trim());return""});return cells}return line.split(/\s{2,}/).map(x=>x.trim())}
 function parseRec(t){const it=[];let sec="direto";
-  String(t).split(/\r?\n/).forEach(l=>{const c=(l.includes("\t")?l.split("\t"):l.split(/\s{2,}/)).map(x=>x.trim());if(c.length<2)return;
-    const cod=c[0],nome=c[1],base=num(c[2]),perda=num(c[5])||0;if(base==null||/reprocesso/i.test(nome))return;
-    if(/etiqueta|filme|fita|bobina|display|\bcx\b|caixa|chocolate|embalag|papel/i.test(nome)){it.push({cod,nome,base,perda,sec:"direto"});return}
-    if(/massa/i.test(nome)){sec="massa";return}if(/recheio/i.test(nome)){sec="recheio";return}
+  String(t).replace(/^\uFEFF/,"").split(/\r?\n/).forEach(l=>{const c=recipeCells(l);if(c.length<2)return;
+    const cod=c[0],nome=c[1],base=num(c[2]),perda=num(c[5])||0;
+    const marker=c.map(norm).find(value=>value==="massa"||value==="recheio");if(base==null&&marker){sec=marker;return}
+    if(base==null||/reprocesso/i.test(nome)||/^(c[oó]digo|produto|insumo|descri[cç][aã]o)$/i.test(nome))return;
+    if(/etiqueta|filme|fita|bobina|display|\bcx\b|caixa|embalag|papel/i.test(nome)){it.push({cod,nome,base,perda,sec:"direto"});return}
     it.push({cod,nome,base,perda,sec})});return it}
+  Object.values(RECS).forEach(recipe=>{if(recipe&&typeof recipe.txt==="string")recipe.items=parseRec(recipe.txt)});sv("kb_rec",RECS);
 function renderRec(){const S=skus();$("rc").hidden=!S.length;if(!S.length)return;if(!S.some(s=>s.key===rcur))rcur=S[0].key;
   $("rtabs").innerHTML=S.map(s=>`<button class="${s.key===rcur?"on":""}" data-k="${esc(s.key)}">${esc(s.name)}${(RECS[s.key]||{items:[]}).items.length?" ✓":""}</button>`).join("");
   const R=RECS[rcur]||{txt:"",items:[]};if(document.activeElement!==$("rtxt"))$("rtxt").value=R.txt||"";
@@ -179,7 +442,7 @@ $("csvI").onclick=()=>{const L=[["Ambiente","Produto","Código","Insumo","Seçã
   Object.keys(ENV).forEach(k=>insumos(k).forEach(b=>b.items.forEach(i=>L.push([ENV[k],b.nome,i.cod,i.nome,i.sec,nz(i.base),nz(i.perda),i.pb==null?"":nz(i.pb),nz(i.mt),nz(i.tot)].map(q).join(";")))));
   if(L.length<2)return toast("Cole ao menos uma receita para exportar os insumos.");save("insumos-"+tag()+".csv","\ufeff"+L.join("\r\n"))};
 const pend=()=>skus().flatMap(s=>{const m=[];if(!(RECS[s.key]&&RECS[s.key].items.length))m.push("receita");if(!cliOf(s.name))m.push("cliente padrão");return m.length?[s.name+" ("+m.join(" e ")+")"]:[]});
-function insumos(k){const out=[],secs=k==="massa"?["massa"]:k==="net"?["recheio"]:k==="dos"?["massa"]:["massa","recheio","direto"];
+function insumos(k){const out=[],secs=k==="massa"?["massa"]:k==="net"?["recheio"]:k==="dos"?["massa","recheio"]:["massa","recheio","direto"];
   sel().forEach(r=>{if(!r.plan)return;const R=RECS[norm(r.sku)];if(!R||!R.items.length)return;const xm=calc(r,"massa"),xn=calc(r,"net");
     const items=R.items.filter(i=>secs.includes(i.sec)).map(i=>{const q=i.sec==="direto"?+r.plan:i.sec==="massa"?(xm?xm.dia:0):(xn?xn.dia:0),dia=q*i.base*(1+i.perda/100);return{...i,nome:k==="log"?i.nome+" ("+i.sec+")":i.nome,dia,t:dia/3,l:r.linha,d:r.data,p:r.sku}});
     if(!items.length)return;
@@ -188,7 +451,7 @@ function insumos(k){const out=[],secs=k==="massa"?["massa"]:k==="net"?["recheio"
 $("csvI").onclick=()=>{const L=[["Ambiente","Linha","Data","Produto","Código","Insumo","Origem","Base (kg/kg)","Perda %","Dia c/ perda (kg)","1º turno","2º turno","3º turno"].join(";")];
   Object.keys(ENV).forEach(k=>insumos(k).forEach(b=>b.items.forEach(i=>L.push([ENV[k],i.l,br(i.d),i.p,i.cod,i.nome,i.sec,nz(i.base),nz(i.perda),nz(i.dia),nz(i.t),nz(i.t),nz(i.t)].map(q).join(";")))));
   if(L.length<2)return toast("Sem insumos para exportar.");save("receitas-"+tag()+".csv","\ufeff"+L.join("\r\n"))};
-function novaFoto(){file=null;$("prev").hidden=true;$("prev").removeAttribute("src");$("file").value="";$("read").disabled=true;$("msg").textContent="Escolha a nova foto do planejamento.";window.scrollTo({top:0,behavior:"smooth"})}
+function novaFoto(){file=null;$("prev").hidden=true;$("prev").removeAttribute("src");$("file").value="";$("read").disabled=true;if($("readAppend"))$("readAppend").disabled=true;$("msg").textContent="Escolha a nova foto do planejamento.";window.scrollTo({top:0,behavior:"smooth"})}
 $("bnew").onclick=novaFoto;
 let wt=0;$("wipe").onclick=e=>{const b=e.target;if(!wt){b.textContent="Confirmar limpeza?";wt=setTimeout(()=>{wt=0;b.textContent="Limpar planejamento"},4000);return}clearTimeout(wt);wt=0;b.textContent="Limpar planejamento";rows=[];render();novaFoto();$("msg").textContent="Planejamento limpo. As receitas coladas foram mantidas."};
 function inRange(r){const a=$("d_de").value,b=$("d_ate").value;return !r.data||((!a||r.data>=a)&&(!b||r.data<=b))}
