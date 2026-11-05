@@ -22,9 +22,9 @@ Deploy no Cloudflare Workers
 
 GitHub
 - O repositorio informado e https://github.com/Nicolassts/pp.git.
-- O ambiente atual nao tem o comando git instalado; por isso, o push nao foi executado.
-- Depois de instalar Git, confira o remoto com git remote -v. Se ainda nao existir, use git remote add origin https://github.com/Nicolassts/pp.git.
-- Revise os arquivos staged e publique com git add, git commit e git push. Nunca versione .dev.vars ou chaves de API.
+- O projeto ja foi publicado na branch main.
+- Para publicar alteracoes futuras, revise git status, depois use git add, git commit e git push.
+- Nunca versione .dev.vars ou chaves de API.
 
 Outros
 - O PDF usa jsPDF e jsPDF-AutoTable (cdnjs; requer internet).
